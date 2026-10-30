@@ -1,83 +1,255 @@
-'use strict';
 
-require('dotenv').config();
-const path = require('node:path');
-const express = require('express');
-const { createAuth } = require('./middleware/auth');
-const { createBrowserRouter } = require('./routes/browser.routes');
-const { BrowserService } = require('./services/browser.service');
-const { HttpError } = require('./utils/validation');
+const express = require("express");
+const { chromium } = require("playwright");
+const crypto = require("crypto");
 
-function createApp({ apiKey, browserService, policy = {} }) {
-  const app = express();
-  app.disable('x-powered-by');
-  app.use(express.json({ limit: '10mb' }));
+const app = express();
 
-  // Public: used by Docker / uptime checks. Leaks nothing sensitive.
-  app.get('/health', (req, res) => {
-    res.json({ status: 'ok', uptime: Math.round(process.uptime()), sessions: browserService.sessionCount() });
-  });
+app.use(express.json({ limit: "1mb" }));
 
-  app.use('/browser', createAuth(apiKey), createBrowserRouter(browserService, policy));
+const PORT = process.env.PORT || 3000;
+const API_KEY = process.env.API_KEY;
 
-  app.use((req, res) => res.status(404).json({ error: 'Not found' }));
-
-  // eslint-disable-next-line no-unused-vars
-  app.use((err, req, res, next) => {
-    if (err.type === 'entity.parse.failed') return res.status(400).json({ error: 'Invalid JSON body' });
-    if (err.type === 'entity.too.large') return res.status(413).json({ error: 'Request body too large' });
-    if (err instanceof HttpError) return res.status(err.status).json({ error: err.message });
-    if (err.name === 'TimeoutError') {
-      return res.status(504).json({ error: 'Browser operation timed out', detail: String(err.message).split('\n')[0] });
-    }
-    console.error(err);
-    return res.status(500).json({ error: 'Internal server error' });
-  });
-
-  return app;
+if (!API_KEY) {
+  throw new Error("API_KEY is required");
 }
 
-function loadConfig(env = process.env) {
-  return {
-    port: Number(env.PORT) || 3000,
-    host: env.HOST || '127.0.0.1',
-    apiKey: env.API_KEY,
-    policy: {
-      allowPrivate: env.ALLOW_PRIVATE_HOSTS === 'true',
-      allowedDomains: (env.ALLOWED_DOMAINS || '').split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
-    },
-    browser: {
-      headless: env.HEADLESS !== 'false',
-      noSandbox: env.NO_SANDBOX === 'true',
-      maxSessions: Number(env.MAX_SESSIONS) || 5,
-      sessionTtlMs: Number(env.SESSION_TTL_MS) || 300000,
-      defaultTimeoutMs: Number(env.DEFAULT_TIMEOUT_MS) || 15000,
-      screenshotsDir: path.resolve(env.SCREENSHOTS_DIR || 'screenshots'),
-    },
-  };
-}
+// Authentication
+app.use((req, res, next) => {
+  const key = req.headers["x-api-key"];
 
-if (require.main === module) {
-  const cfg = loadConfig();
-  if (!cfg.apiKey || cfg.apiKey.length < 16) {
-    console.error('API_KEY is missing or shorter than 16 characters. Copy .env.example to .env and set it.');
-    process.exit(1);
+  if (
+    typeof key !== "string" ||
+    key.length !== API_KEY.length ||
+    !crypto.timingSafeEqual(
+      Buffer.from(key),
+      Buffer.from(API_KEY)
+    )
+  ) {
+    return res.status(401).json({
+      success: false,
+      error: "Unauthorized"
+    });
   }
 
-  const service = new BrowserService({ ...cfg.browser, policy: cfg.policy });
-  const app = createApp({ apiKey: cfg.apiKey, browserService: service, policy: cfg.policy });
-  const server = app.listen(cfg.port, cfg.host, () => {
-    console.log(`Playwright bridge listening on http://${cfg.host}:${cfg.port}`);
-    if (cfg.policy.allowPrivate) console.warn('WARNING: ALLOW_PRIVATE_HOSTS=true, SSRF protection is off');
-  });
+  next();
+});
 
-  const shutdown = async () => {
-    server.close();
-    await service.close();
-    process.exit(0);
-  };
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+let browser;
+
+async function getBrowser() {
+  if (!browser || !browser.isConnected()) {
+    browser = await chromium.launch({
+      headless: true,
+      args: ["--no-sandbox"]
+    });
+  }
+
+  return browser;
 }
 
-module.exports = { createApp, loadConfig };
+// Health check
+app.get("/health", async (req, res) => {
+  try {
+    const b = await getBrowser();
+
+    res.json({
+      success: true,
+      status: "running",
+      browser: b.isConnected() ? "connected" : "disconnected"
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Execute browser actions
+app.post("/execute", async (req, res) => {
+  const { actions } = req.body;
+
+  if (!Array.isArray(actions) || actions.length === 0 || actions.length > 15) {
+    return res.status(400).json({
+      success: false,
+      error: "Provide between 1 and 15 actions"
+    });
+  }
+
+  let context;
+
+  try {
+    const b = await getBrowser();
+
+    context = await b.newContext({
+      viewport: {
+        width: 1366,
+        height: 768
+      }
+    });
+
+    const page = await context.newPage();
+
+    page.setDefaultTimeout(15000);
+
+    const results = [];
+
+    for (const action of actions) {
+      let result;
+
+      switch (action.type) {
+        case "navigate": {
+          const url = new URL(action.url);
+
+          if (!["http:", "https:"].includes(url.protocol)) {
+            throw new Error("Only HTTP and HTTPS URLs are allowed");
+          }
+
+          await page.goto(url.href, {
+            waitUntil: "domcontentloaded",
+            timeout: 30000
+          });
+
+          result = {
+            url: page.url(),
+            title: await page.title()
+          };
+          break;
+        }
+
+        case "click": {
+          if (!action.selector) {
+            throw new Error("Selector is required");
+          }
+
+          await page.locator(action.selector).first().click();
+
+          result = {
+            clicked: action.selector
+          };
+          break;
+        }
+
+        case "fill": {
+          if (!action.selector) {
+            throw new Error("Selector is required");
+          }
+
+          await page.locator(action.selector).first().fill(
+            String(action.value ?? "")
+          );
+
+          result = {
+            filled: action.selector
+          };
+          break;
+        }
+
+        case "select": {
+          await page.locator(action.selector).first().selectOption(
+            String(action.value)
+          );
+
+          result = {
+            selected: action.value
+          };
+          break;
+        }
+
+        case "wait": {
+          const duration = Math.min(
+            Math.max(Number(action.ms) || 1000, 0),
+            10000
+          );
+
+          await page.waitForTimeout(duration);
+
+          result = {
+            waited: duration
+          };
+          break;
+        }
+
+        case "waitFor": {
+          await page.locator(action.selector).first().waitFor({
+            state: "visible"
+          });
+
+          result = {
+            visible: action.selector
+          };
+          break;
+        }
+
+        case "extract": {
+          const selector = action.selector || "body";
+
+          const text = await page.locator(selector).first().innerText();
+
+          result = {
+            text: text.slice(0, 12000)
+          };
+          break;
+        }
+
+        case "screenshot": {
+          const screenshot = await page.screenshot({
+            type: "png",
+            fullPage: false
+          });
+
+          result = {
+            screenshot: screenshot.toString("base64"),
+            format: "png"
+          };
+          break;
+        }
+
+        default:
+          throw new Error(`Unsupported action: ${action.type}`);
+      }
+
+      results.push({
+        action: action.type,
+        success: true,
+        result
+      });
+    }
+
+    res.json({
+      success: true,
+      currentUrl: page.url(),
+      title: await page.title(),
+      results
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+
+  } finally {
+    if (context) {
+      await context.close();
+    }
+  }
+});
+
+// Start server
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`Playwright Bridge running on port ${PORT}`);
+});
+
+// Graceful shutdown
+async function shutdown() {
+  if (browser) {
+    await browser.close();
+  }
+
+  process.exit(0);
+}
+
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
