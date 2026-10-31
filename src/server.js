@@ -1,509 +1,463 @@
-
-const express = require("express");
-const { chromium } = require("playwright");
-const fs = require("fs");
-const path = require("path");
+const express = require('express');
+const path = require('path');
+const fs = require('fs');
+const { chromium } = require('playwright');
 
 const app = express();
+const PORT = Number(process.env.PORT || 3000);
+const API_KEY = process.env.API_KEY || 'change-this-secret';
 
-app.use(express.json({ limit: "10mb" }));
+const BRAVE_PATH = process.env.BRAVE_PATH ||
+  'C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe';
 
-// ===============================
-// CONFIGURATION
-// ===============================
+const PROFILE_DIR = process.env.PROFILE_DIR ||
+  'C:\\BraveProfiles\\youssef\\profile1';
 
-const PORT = 3000;
-const API_KEY = process.env.API_KEY || "change-this-secret";
+const SCREENSHOT_DIR = path.join(__dirname, 'screenshots');
 
-const BRAVE_PATH =
-  "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
-
-const PROFILE_PATH = "C:\\BraveProfiles\\youssef\\profile1";
-
-const SCREENSHOT_DIR = path.join(__dirname, "screenshots");
-
-// ===============================
-// BROWSER STATE
-// ===============================
+app.use(express.json({ limit: '10mb' }));
 
 let context = null;
 let page = null;
-let launchPromise = null;
 let requestQueue = Promise.resolve();
 
-if (!fs.existsSync(SCREENSHOT_DIR)) {
-  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
+function enqueue(task) {
+  const result = requestQueue.then(task, task);
+  requestQueue = result.catch(() => {});
+  return result;
 }
 
-// ===============================
-// API KEY AUTHENTICATION
-// ===============================
+function authenticate(req, res, next) {
+  const bearer = (req.headers.authorization || '').replace(/^Bearer\s+/i, '');
+  const suppliedKey = req.headers['x-api-key'] || bearer;
 
-function checkApiKey(req, res, next) {
-  const providedKey =
-    req.headers["x-api-key"] ||
-    (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
-
-  if (providedKey !== API_KEY) {
+  if (!suppliedKey || suppliedKey !== API_KEY) {
     return res.status(401).json({
       success: false,
-      error: "Unauthorized: Invalid API key"
+      error: 'Unauthorized: invalid or missing API key'
     });
   }
 
   next();
 }
 
-// ===============================
-// NORMALIZE AI AGENT ACTIONS
-// ===============================
-
-function normalizeAction(action) {
-  if (!action || typeof action !== "object" || Array.isArray(action)) {
-    throw new Error("Invalid browser action");
+function normalizeAction(input) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new Error('Invalid browser action: action must be an object');
   }
 
-  // Standard format:
-  // { type: "navigate", url: "https://youtube.com" }
+  let actionName;
+  let data;
 
-  if (typeof action.type === "string") {
-    const normalized = { ...action };
+  if (typeof input.action === 'string') {
+    actionName = input.action;
+    data = { ...input };
+    delete data.action;
+  } else if (typeof input.type === 'string') {
+    actionName = input.type;
+    data = { ...input };
+    delete data.type;
+  } else {
+    const keys = Object.keys(input);
 
-    if (normalized.type === "goto") {
-      normalized.type = "navigate";
+    if (keys.length !== 1) {
+      throw new Error(
+        'Invalid browser action format: use { action: "...", ... } or { type: "...", ... }'
+      );
     }
 
-    if (
-      normalized.type === "wait" &&
-      normalized.ms === undefined &&
-      normalized.milliseconds !== undefined
-    ) {
-      normalized.ms = normalized.milliseconds;
+    actionName = keys[0];
+    const value = input[actionName];
+
+    data = value && typeof value === 'object' && !Array.isArray(value)
+      ? { ...value }
+      : {};
+
+    if (value !== undefined && (value === null || typeof value !== 'object')) {
+      data.value = value;
     }
-
-    return normalized;
   }
 
-  // AI Agent format:
-  // { goto: { url: "https://youtube.com" } }
-
-  const actionNames = Object.keys(action);
-
-  if (actionNames.length !== 1) {
-    throw new Error("Invalid browser action format");
-  }
-
-  let actionName = actionNames[0];
-  const actionParams = action[actionName];
-
-  if (actionName === "goto") {
-    actionName = "navigate";
-  }
-
-  const normalized = {
-    type: actionName,
-    ...(actionParams && typeof actionParams === "object"
-      ? actionParams
-      : {})
+  const aliases = {
+    open: 'navigate',
+    open_url: 'navigate',
+    goto: 'navigate',
+    navigate: 'navigate',
+    type: 'fill',
+    input: 'fill',
+    waitfor: 'waitFor',
+    wait_for: 'waitFor',
+    pageinfo: 'pageInfo',
+    page_info: 'pageInfo',
+    close: 'closeBrowser',
+    close_browser: 'closeBrowser',
+    closebrowser: 'closeBrowser',
+    screenshot: 'screenshot',
+    extract: 'extract',
+    press: 'press',
+    click: 'click',
+    fill: 'fill',
+    select: 'select',
+    wait: 'wait',
+    back: 'back',
+    reload: 'reload'
   };
 
-  if (
-    normalized.type === "wait" &&
-    normalized.ms === undefined &&
-    normalized.milliseconds !== undefined
-  ) {
-    normalized.ms = normalized.milliseconds;
+  const normalizedName = aliases[String(actionName).toLowerCase()];
+
+  if (!normalizedName) {
+    throw new Error(`Unsupported action: ${actionName}`);
   }
 
-  return normalized;
+  if (normalizedName === 'fill') {
+    data.value = data.value ?? data.text ?? data.content ?? '';
+  }
+
+  if (normalizedName === 'wait') {
+    data.ms = data.ms ?? data.time ?? data.milliseconds ?? 1000;
+  }
+
+  if (normalizedName === 'navigate') {
+    data.url = data.url ?? data.href;
+  }
+
+  if (normalizedName === 'press') {
+    data.key = data.key ?? data.text;
+  }
+
+  return { type: normalizedName, ...data };
 }
 
-// ===============================
-// GET OR LAUNCH BROWSER
-// ===============================
-
 async function getBrowserPage() {
-  if (context && page && !page.isClosed()) {
-    return page;
-  }
+  if (!context) {
+    if (!fs.existsSync(BRAVE_PATH)) {
+      throw new Error(`Brave executable not found: ${BRAVE_PATH}`);
+    }
 
-  if (launchPromise) {
-    return await launchPromise;
-  }
+    fs.mkdirSync(PROFILE_DIR, { recursive: true });
+    fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-  launchPromise = (async () => {
-    context = await chromium.launchPersistentContext(PROFILE_PATH, {
+    context = await chromium.launchPersistentContext(PROFILE_DIR, {
       executablePath: BRAVE_PATH,
       headless: false,
-      viewport: {
-        width: 1366,
-        height: 768
-      },
+      viewport: null,
       args: [
-        "--no-first-run",
-        "--no-default-browser-check"
+        '--start-maximized',
+        '--no-first-run',
+        '--no-default-browser-check'
       ]
     });
 
-    // Close restored tabs so only one working tab remains.
-    const existingPages = context.pages();
-
-    for (const existingPage of existingPages) {
-      await existingPage.close().catch(() => {});
-    }
-
-    page = await context.newPage();
-
-    page.setDefaultTimeout(15000);
-    page.setDefaultNavigationTimeout(30000);
-
-    console.log("Brave started with Profile 1.");
-
-    return page;
-  })();
-
-  try {
-    return await launchPromise;
-  } finally {
-    launchPromise = null;
+    context.on('close', () => {
+      context = null;
+      page = null;
+    });
   }
-}
 
-// ===============================
-// CLOSE BROWSER
-// ===============================
+  const pages = context.pages();
+
+  page = pages.length
+    ? pages[0]
+    : await context.newPage();
+
+  return page;
+}
 
 async function closeBrowser() {
   if (context) {
-    await context.close().catch(() => {});
+    const currentContext = context;
+
+    context = null;
+    page = null;
+
+    await currentContext.close();
   }
 
-  context = null;
-  page = null;
-
-  console.log("Brave browser closed.");
-
-  return {
-    success: true,
-    message: "Browser closed"
-  };
+  return { closed: true };
 }
 
-// ===============================
-// ACTION HANDLER
-// ===============================
+async function runAction(rawAction, index) {
+  const action = normalizeAction(rawAction);
 
-async function runAction(action) {
+  if (action.type === 'closeBrowser') {
+    return closeBrowser();
+  }
+
   const currentPage = await getBrowserPage();
+  const selector = action.selector;
+  const timeout = Number(action.timeout || 15000);
 
   switch (action.type) {
 
-    // NAVIGATE / GOTO
-    case "navigate": {
-      if (!action.url) {
-        throw new Error("Navigate requires a URL");
+    case 'navigate': {
+      if (typeof action.url !== 'string' || !action.url.trim()) {
+        throw new Error('navigate action requires a url');
       }
 
-      const url = new URL(action.url);
+      const parsed = new URL(action.url);
 
-      if (!["http:", "https:"].includes(url.protocol)) {
-        throw new Error("Only HTTP and HTTPS URLs are allowed");
+      if (!['http:', 'https:'].includes(parsed.protocol)) {
+        throw new Error('Only http and https URLs are allowed');
       }
 
-      await currentPage.goto(url.toString(), {
-        waitUntil: "domcontentloaded",
-        timeout: 30000
+      await currentPage.goto(parsed.href, {
+        waitUntil: action.waitUntil || 'domcontentloaded',
+        timeout
       });
 
       return {
-        success: true,
         url: currentPage.url(),
         title: await currentPage.title()
       };
     }
 
-    // CLICK
-    case "click": {
-      if (!action.selector) {
-        throw new Error("Click requires a selector");
+    case 'click': {
+      if (!selector) {
+        throw new Error('click action requires selector');
       }
 
-      await currentPage.locator(action.selector).first().click();
+      await currentPage.locator(selector).first().click({ timeout });
+
+      return { clicked: selector };
+    }
+
+    case 'fill': {
+      if (!selector) {
+        throw new Error('fill/type action requires selector');
+      }
+
+      await currentPage.locator(selector).first().fill(
+        String(action.value),
+        { timeout }
+      );
+
+      return { filled: selector };
+    }
+
+    case 'press': {
+      if (!action.key) {
+        throw new Error('press action requires key');
+      }
+
+      if (selector) {
+        await currentPage.locator(selector).first().press(
+          String(action.key),
+          { timeout }
+        );
+      } else {
+        await currentPage.keyboard.press(String(action.key));
+      }
 
       return {
-        success: true,
-        action: "click",
-        selector: action.selector
+        pressed: action.key,
+        selector: selector || null
       };
     }
 
-    // FILL INPUT
-    case "fill": {
-      if (!action.selector) {
-        throw new Error("Fill requires a selector");
+    case 'select': {
+      if (!selector) {
+        throw new Error('select action requires selector');
       }
 
-      await currentPage.locator(action.selector).first().fill(
-        String(action.value ?? "")
+      const value = action.value ?? action.option;
+
+      if (value === undefined) {
+        throw new Error('select action requires value or option');
+      }
+
+      await currentPage.locator(selector).first().selectOption(
+        String(value),
+        { timeout }
       );
 
       return {
-        success: true,
-        action: "fill",
-        selector: action.selector
+        selected: value,
+        selector
       };
     }
 
-    // SELECT OPTION
-    case "select": {
-      if (!action.selector) {
-        throw new Error("Select requires a selector");
-      }
-
-      await currentPage.locator(action.selector).first().selectOption(
-        String(action.value)
-      );
-
-      return {
-        success: true,
-        action: "select"
-      };
-    }
-
-    // WAIT
-    case "wait": {
-      const ms = Math.min(
-        Math.max(Number(action.ms) || 1000, 0),
-        30000
+    case 'wait': {
+      const ms = Math.max(
+        0,
+        Math.min(Number(action.ms) || 0, 120000)
       );
 
       await currentPage.waitForTimeout(ms);
 
-      return {
-        success: true,
-        waited: ms
-      };
+      return { waited: ms };
     }
 
-    // WAIT FOR ELEMENT
-    case "waitFor": {
-      if (!action.selector) {
-        throw new Error("waitFor requires a selector");
+    case 'waitFor': {
+      if (selector) {
+        await currentPage.locator(selector).first().waitFor({
+          state: action.state || 'visible',
+          timeout
+        });
+
+        return {
+          selector,
+          state: action.state || 'visible'
+        };
       }
 
-      await currentPage.locator(action.selector).first().waitFor({
-        state: action.state || "visible",
-        timeout: action.timeout || 15000
-      });
-
-      return {
-        success: true,
-        action: "waitFor",
-        selector: action.selector
-      };
-    }
-
-    // EXTRACT TEXT
-    case "extract": {
-      const selector = action.selector || "body";
-
-      const text = await currentPage
-        .locator(selector)
-        .first()
-        .innerText()
-        .catch(() => "");
-
-      const maxLength = Math.min(
-        Number(action.maxLength) || 5000,
-        10000
+      await currentPage.waitForLoadState(
+        action.state || 'domcontentloaded',
+        { timeout }
       );
 
       return {
-        success: true,
-        text: text.slice(0, maxLength)
+        state: action.state || 'domcontentloaded'
       };
     }
 
-    // PAGE INFORMATION
-    case "pageInfo": {
-      const title = await currentPage.title();
+    case 'extract': {
+      const target = currentPage.locator(selector || 'body').first();
+      const attribute = String(action.attribute || 'innerText');
 
-      const text = await currentPage
-        .locator("body")
-        .innerText()
-        .catch(() => "");
+      let value;
+
+      if (attribute === 'innerText') {
+        value = await target.innerText({ timeout });
+      } else if (attribute === 'textContent') {
+        value = await target.textContent({ timeout });
+      } else if (attribute === 'value') {
+        value = await target.inputValue({ timeout });
+      } else {
+        value = await target.getAttribute(attribute, { timeout });
+      }
 
       return {
-        success: true,
+        selector: selector || 'body',
+        attribute,
+        value
+      };
+    }
+
+    case 'pageInfo':
+      return {
         url: currentPage.url(),
-        title,
-        text: text.slice(0, 5000)
+        title: await currentPage.title()
       };
-    }
 
-    // SCREENSHOT
-    case "screenshot": {
-      const filename =
-        "screenshot-" + Date.now() + ".png";
+    case 'screenshot': {
+      fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 
-      const screenshotPath = path.join(
-        SCREENSHOT_DIR,
-        filename
-      );
+      const filename = `screenshot-${Date.now()}-${index + 1}.png`;
+      const filepath = path.join(SCREENSHOT_DIR, filename);
 
       await currentPage.screenshot({
-        path: screenshotPath,
+        path: filepath,
         fullPage: Boolean(action.fullPage)
       });
 
       return {
-        success: true,
-        screenshot: filename,
-        path: screenshotPath
+        screenshot: filepath,
+        filename
       };
     }
 
-    // BACK
-    case "back": {
+    case 'back':
       await currentPage.goBack({
-        waitUntil: "domcontentloaded",
-        timeout: 30000
-      }).catch(() => {});
+        waitUntil: action.waitUntil || 'domcontentloaded',
+        timeout
+      });
 
-      return {
-        success: true,
-        url: currentPage.url()
-      };
-    }
+      return { url: currentPage.url() };
 
-    // RELOAD
-    case "reload": {
+    case 'reload':
       await currentPage.reload({
-        waitUntil: "domcontentloaded",
-        timeout: 30000
+        waitUntil: action.waitUntil || 'domcontentloaded',
+        timeout
       });
 
       return {
-        success: true,
-        url: currentPage.url()
+        url: currentPage.url(),
+        title: await currentPage.title()
       };
-    }
-
-    // CLOSE BROWSER
-    case "closeBrowser": {
-      await closeBrowser();
-
-      return {
-        success: true,
-        message: "Browser closed"
-      };
-    }
 
     default:
-      throw new Error(`Unsupported action: ${action.type}`);
+      throw new Error(
+        `Unsupported action after normalization: ${action.type}`
+      );
   }
 }
 
-// ===============================
-// SERIALIZE REQUESTS
-// ===============================
-
-function enqueue(task) {
-  const result = requestQueue.then(task);
-
-  requestQueue = result.catch(() => {});
-
-  return result;
-}
-
-// ===============================
-// HEALTH CHECK
-// ===============================
-
-app.get("/health", (req, res) => {
+app.get('/health', (req, res) => {
   res.json({
     success: true,
-    service: "Brave Browser Automation",
-    browser: "Brave",
-    profile: "Profile 1",
-    port: PORT,
-    browserOpen: Boolean(context)
+    status: 'online',
+    browserOpen: Boolean(context),
+    browser: 'Brave',
+    headless: false
   });
 });
 
-// ===============================
-// EXECUTE ACTIONS
-// ===============================
-
-app.post("/execute", checkApiKey, async (req, res) => {
+app.post('/execute', authenticate, async (req, res) => {
   try {
-    const actions = req.body.actions;
+    const actions = Array.isArray(req.body.actions)
+      ? req.body.actions
+      : (req.body.action || req.body.type ? [req.body] : null);
 
-    if (!Array.isArray(actions) || actions.length === 0) {
+    if (!actions || actions.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "Request must contain a non-empty actions array"
+        error: 'Request body must contain a non-empty actions array'
       });
     }
 
     const results = await enqueue(async () => {
-      const actionResults = [];
+      const output = [];
 
       for (let i = 0; i < actions.length; i++) {
-        const normalizedAction = normalizeAction(actions[i]);
-
         try {
-          const result = await runAction(normalizedAction);
-
-          actionResults.push({
+          output.push({
             index: i,
-            action: normalizedAction.type,
-            ...result
+            success: true,
+            result: await runAction(actions[i], i)
           });
         } catch (error) {
-          actionResults.push({
+          output.push({
             index: i,
-            action: normalizedAction.type,
             success: false,
             error: error.message
           });
 
-          // Stop after a failed action.
-          break;
+          throw Object.assign(
+            new Error(error.message),
+            {
+              actionResults: output,
+              failedIndex: i
+            }
+          );
         }
       }
 
-      return actionResults;
+      return output;
     });
 
-    const success = results.every(item => item.success !== false);
-
-    res.status(success ? 200 : 500).json({
-      success,
-      totalActions: actions.length,
-      completedActions: results.length,
+    res.json({
+      success: true,
       results
     });
 
   } catch (error) {
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
+      failedIndex: error.failedIndex ?? null,
+      results: error.actionResults || []
     });
   }
 });
 
-// ===============================
-// CLOSE ENDPOINT
-// ===============================
-
-app.post("/close", checkApiKey, async (req, res) => {
+app.post('/close', authenticate, async (req, res) => {
   try {
-    const result = await enqueue(async () => {
-      return await closeBrowser();
-    });
+    const result = await enqueue(closeBrowser);
 
-    res.json(result);
+    res.json({
+      success: true,
+      result
+    });
 
   } catch (error) {
     res.status(500).json({
@@ -513,16 +467,22 @@ app.post("/close", checkApiKey, async (req, res) => {
   }
 });
 
-// ===============================
-// SERVER
-// ===============================
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log("--------------------------------");
-  console.log("Brave Browser Automation Server");
-  console.log("--------------------------------");
-  console.log(`Port: ${PORT}`);
-  console.log("Profile: Profile 1");
-  console.log("Browser: Brave");
-  console.log("Server ready.");
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`Browser automation server running on http://localhost:${PORT}`);
+  console.log('Browser: Brave | Visible window: ON (headless:false)');
+  console.log(`Brave executable: ${BRAVE_PATH}`);
+  console.log(`Brave profile: ${PROFILE_DIR}`);
 });
+
+async function shutdown() {
+  try {
+    await closeBrowser();
+  } catch (error) {
+    console.error('Error while closing Brave:', error.message);
+  }
+
+  process.exit(0);
+}
+
+process.on('SIGINT', shutdown);
+process.on('SIGTERM', shutdown);
