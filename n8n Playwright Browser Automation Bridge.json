@@ -2,25 +2,7 @@
   "nodes": [
     {
       "parameters": {
-        "promptType": "define",
-        "text": "={{ $('Receive Client Message').item.json.message.text }}",
-        "needsFallback": true,
-        "options": {
-          "systemMessage": "=\nYou control a persistent Brave browser using the Playwright tool.\n\nIMPORTANT RULES:\n\n1. The browser stays open between tasks. Reuse the current browser page. Do not open a new browser unless necessary.\n\n2. Before clicking a video, inspect the current page.\n\n3. When the user says \"that video\", \"the first video\", or describes a video topic:\n   - Call inspectVideos first.\n   - Read the returned video titles and URLs.\n   - Identify the best matching video based on the user's request.\n   - Use findAndClick with the matching title or a distinctive part of it.\n\n4. Never guess which video the user means.\n5. If no matching video is found, scroll and inspect again.\n6. If multiple videos match and the intended one is unclear, ask the user.\n7. Never claim an action succeeded unless the Playwright tool confirms it.\n8. Do not close the browser unless the user explicitly asks.\n9. For scrolling, use the scroll action.\n10. For coordinate clicks, provide both x and y. Prefer title-based clicking when possible.\n"
-        }
-      },
-      "type": "@n8n/n8n-nodes-langchain.agent",
-      "typeVersion": 3.1,
-      "position": [
-        256,
-        400
-      ],
-      "id": "47415c7e-51a8-45c2-b203-1629563ccc5a",
-      "name": "AI Agent"
-    },
-    {
-      "parameters": {
-        "toolDescription": "=Use this tool to browse websites, \nsearch the web, interact with pages, and extract relevant information using Brave Profile 1.",
+        "toolDescription": "=Controls my visible Brave browser (POST /execute). Body: {\"actions\":[{\"type\":\"...\"}]}.\nActions: navigate, click, fill, press, scroll, hover, select, wait, waitFor, extract, evaluate, inspectPage, getPageState, screenshot, newTab, switchTab, closeTab, back, forward, reload.\nExample: {\"type\":\"scroll\",\"direction\":\"up\",\"amount\":800}. Inspect before guessing selectors.",
         "method": "POST",
         "url": "http://host.docker.internal:3000/execute",
         "sendHeaders": true,
@@ -50,7 +32,7 @@
       "type": "n8n-nodes-base.httpRequestTool",
       "typeVersion": 4.4,
       "position": [
-        224,
+        304,
         720
       ],
       "id": "896c0ce1-48d4-4e53-8321-9a5b52b40dc0",
@@ -70,7 +52,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
       "typeVersion": 1.3,
       "position": [
-        -16,
+        64,
         720
       ],
       "id": "816ed269-c785-48fe-ba1e-ad0b08259062",
@@ -315,172 +297,6 @@
     },
     {
       "parameters": {
-        "text": "=only for rag system",
-        "needsFallback": true,
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.agentTool",
-      "typeVersion": 3,
-      "position": [
-        704,
-        656
-      ],
-      "id": "231624d9-ae82-4be3-8a46-b098d4f9a1c7",
-      "name": "AI Agent Tool"
-    },
-    {
-      "parameters": {
-        "content": "# Models\n\n- Main Chat Model: used by the agent\n- Fallback Chat Model: used if the main one fails",
-        "height": 288,
-        "width": 288
-      },
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        496,
-        896
-      ],
-      "id": "0e175829-c8fd-44e7-a815-05524ebe589d",
-      "name": "Sticky Note5"
-    },
-    {
-      "parameters": {
-        "content": "# Memory\n\nKeeps the recent conversation so the agent remembers the context.",
-        "height": 288,
-        "width": 198,
-        "color": 6
-      },
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        816,
-        896
-      ],
-      "id": "1c58bcb1-b4b1-4d74-a9ac-78d70ec186b0",
-      "name": "Sticky Note6"
-    },
-    {
-      "parameters": {
-        "content": "# Vector Database\n\nThe agent's knowledge base.\n\n- PostgreSQL with pgvector (table: documents)\n- Embeddings must match the ones used in ingestion",
-        "height": 352,
-        "width": 416,
-        "color": 5
-      },
-      "type": "n8n-nodes-base.stickyNote",
-      "typeVersion": 1,
-      "position": [
-        1040,
-        832
-      ],
-      "id": "1d4d379d-c934-4780-889e-a6511d18d16b",
-      "name": "Sticky Note7"
-    },
-    {
-      "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-5.4-mini",
-          "mode": "list",
-          "cachedResultName": "gpt-5.4-mini"
-        },
-        "builtInTools": {},
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.3,
-      "position": [
-        544,
-        1056
-      ],
-      "id": "a7acbdfa-6dee-413b-be20-454c5f4d911e",
-      "name": "Main Chat Model",
-      "credentials": {
-        "openAiApi": {
-          "id": "pPUmz9DqVW1Cainf",
-          "name": "ABDERRAHMANE--OFFIC"
-        }
-      }
-    },
-    {
-      "parameters": {},
-      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
-      "typeVersion": 1.4,
-      "position": [
-        880,
-        1056
-      ],
-      "id": "71a11f7b-463f-4992-b24f-56a42c36c502",
-      "name": "Conversation Memory"
-    },
-    {
-      "parameters": {
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.embeddingsOpenAi",
-      "typeVersion": 1.2,
-      "position": [
-        1104,
-        1056
-      ],
-      "id": "fcf0c6c0-4092-486f-8148-42203ffc9209",
-      "name": "Embeddings (Search)",
-      "credentials": {
-        "openAiApi": {
-          "id": "pPUmz9DqVW1Cainf",
-          "name": "ABDERRAHMANE--OFFIC"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "mode": "retrieve-as-tool",
-        "toolDescription": "get the data frome documents",
-        "tableName": "documents",
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.vectorStorePGVector",
-      "typeVersion": 1.3,
-      "position": [
-        1184,
-        928
-      ],
-      "id": "53425aa8-07f7-4458-8292-6312f94e2d7e",
-      "name": "Knowledge Base Search",
-      "credentials": {
-        "postgres": {
-          "id": "8LB2yJOaHaehlFyx",
-          "name": "rag-system"
-        }
-      }
-    },
-    {
-      "parameters": {
-        "model": {
-          "__rl": true,
-          "value": "gpt-5.4-mini",
-          "mode": "list",
-          "cachedResultName": "gpt-5.4-mini"
-        },
-        "builtInTools": {},
-        "options": {}
-      },
-      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
-      "typeVersion": 1.3,
-      "position": [
-        672,
-        1056
-      ],
-      "id": "ebe990ff-85b6-46d7-bf10-1c93563d301b",
-      "name": "Fallback-Chat",
-      "credentials": {
-        "openAiApi": {
-          "id": "pPUmz9DqVW1Cainf",
-          "name": "ABDERRAHMANE--OFFIC"
-        }
-      }
-    },
-    {
-      "parameters": {
         "chatId": "={{ $('Receive Client Message').item.json.message.chat.id }}",
         "text": "={{ $json.output }}",
         "additionalFields": {
@@ -491,8 +307,8 @@
       "type": "n8n-nodes-base.telegram",
       "typeVersion": 1.2,
       "position": [
-        608,
-        400
+        720,
+        480
       ],
       "id": "d29d2dd1-415a-4259-8438-50c6f33332f1",
       "name": "Reply to Client",
@@ -512,7 +328,7 @@
       "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
       "typeVersion": 1,
       "position": [
-        96,
+        176,
         720
       ],
       "id": "8b1f5766-86dd-4cd4-b2fc-e3de5d5b41fd",
@@ -532,30 +348,149 @@
       "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
       "typeVersion": 1.4,
       "position": [
-        368,
+        448,
         720
       ],
       "id": "3d2e3ac3-ac2f-492d-be6e-e6d81f0e03c4",
       "name": "Simple Memory"
+    },
+    {
+      "parameters": {
+        "toolDescription": "=Controls my visible Brave browser (POST /execute). Body: {\"actions\":[{\"type\":\"...\"}]}.\nActions: navigate, click, fill, press, scroll, hover, select, wait, waitFor, extract, evaluate, inspectPage, getPageState, screenshot, newTab, switchTab, closeTab, back, forward, reload.\nExample: {\"type\":\"scroll\",\"direction\":\"up\",\"amount\":800}. Inspect before guessing selectors.",
+        "method": "POST",
+        "url": "http://host.docker.internal:3000/execute",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            },
+            {
+              "name": "x-api-key",
+              "value": "change-this-secret"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "actions",
+              "value": "={{ $fromAI(\"actions\", \"Array of browser actions\", \"json\") }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequestTool",
+      "typeVersion": 4.4,
+      "position": [
+        112,
+        48
+      ],
+      "id": "4e358e31-3c3f-436b-aff4-8191ae89ef3c",
+      "name": "playwright1"
+    },
+    {
+      "parameters": {
+        "model": {
+          "__rl": true,
+          "value": "gpt-5.4-mini",
+          "mode": "list",
+          "cachedResultName": "gpt-5.4-mini"
+        },
+        "builtInTools": {},
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1.3,
+      "position": [
+        -128,
+        48
+      ],
+      "id": "4b56ac8b-2e58-4959-af08-965f10658e26",
+      "name": "LLM1",
+      "credentials": {
+        "openAiApi": {
+          "id": "pPUmz9DqVW1Cainf",
+          "name": "ABDERRAHMANE--OFFIC"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "model": "deepseek-flash",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        -256,
+        48
+      ],
+      "id": "e497406a-6815-4e06-ba33-33e4068a1b1b",
+      "name": "LLm cheep1",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "grSYfp5xFliPzxjZ",
+          "name": "n8n Playwright Browser Automation Bridge"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "text": "={{ /*n8n-auto-generated-fromAI-override*/ $fromAI('Prompt__User_Message_', ``, 'string') }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You are Browser_Recovery_Agent. Your job is to solve tasks Main_Browser_Agent cannot complete.\nInspect the current browser using Playwright, diagnose the problem, and try alternative actions.\nUse screenshots and page content when needed; never repeat failed actions without changing strategy.\nIf login, CAPTCHA, OTP, or human verification is required, ask the user to intervene manually.\nReturn the result, actions taken, and remaining problems to Main_Browser_Agent.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agentTool",
+      "typeVersion": 3,
+      "position": [
+        32,
+        -176
+      ],
+      "id": "2dee7673-2f0a-4df7-ac85-8a42c095d023",
+      "name": "Browser_Recovery_Agent"
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "={{ $('Receive Client Message').item.json.message.text }}",
+        "needsFallback": true,
+        "options": {
+          "systemMessage": "=You control a real Brave browser through the Playwright HTTP tool.\nInspect the page (inspectPage / getPageState) before acting, and verify the result after important steps.\nIf an action fails, read the error, adjust, and retry differently. Never repeat the same failed action.\nNever claim success without tool confirmation.\nFor login, CAPTCHA, OTP, or sensitive actions, ask me to do it manually in Brave.\nBe concise and honest.\n\n\n\nYou control Brave through Playwright. Inspect, act, and verify; if you fail, get stuck, or cannot identify something, delegate to Browser_Recovery_Agent with the task, page state, and error, then continue using its result.\n"
+        }
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3.1,
+      "position": [
+        336,
+        400
+      ],
+      "id": "47415c7e-51a8-45c2-b203-1629563ccc5a",
+      "name": "Main_Browser_Agent"
+    },
+    {
+      "parameters": {},
+      "type": "@n8n/n8n-nodes-langchain.memoryBufferWindow",
+      "typeVersion": 1.4,
+      "position": [
+        256,
+        48
+      ],
+      "id": "e4015bd2-3d0e-4cd3-889f-0a10ef3b0c2a",
+      "name": "Simple Memory1"
     }
   ],
   "connections": {
-    "AI Agent": {
-      "main": [
-        [
-          {
-            "node": "Reply to Client",
-            "type": "main",
-            "index": 0
-          }
-        ]
-      ]
-    },
     "playwright": {
       "ai_tool": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "ai_tool",
             "index": 0
           }
@@ -566,9 +501,9 @@
       "ai_languageModel": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "ai_languageModel",
-            "index": 0
+            "index": 1
           }
         ]
       ]
@@ -635,7 +570,7 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "main",
             "index": 0
           }
@@ -646,7 +581,7 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "main",
             "index": 0
           }
@@ -657,75 +592,9 @@
       "main": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "main",
             "index": 0
-          }
-        ]
-      ]
-    },
-    "AI Agent Tool": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Main Chat Model": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "AI Agent Tool",
-            "type": "ai_languageModel",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Conversation Memory": {
-      "ai_memory": [
-        [
-          {
-            "node": "AI Agent Tool",
-            "type": "ai_memory",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Embeddings (Search)": {
-      "ai_embedding": [
-        [
-          {
-            "node": "Knowledge Base Search",
-            "type": "ai_embedding",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Knowledge Base Search": {
-      "ai_tool": [
-        [
-          {
-            "node": "AI Agent Tool",
-            "type": "ai_tool",
-            "index": 0
-          }
-        ]
-      ]
-    },
-    "Fallback-Chat": {
-      "ai_languageModel": [
-        [
-          {
-            "node": "AI Agent Tool",
-            "type": "ai_languageModel",
-            "index": 1
           }
         ]
       ]
@@ -734,9 +603,9 @@
       "ai_languageModel": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
             "type": "ai_languageModel",
-            "index": 1
+            "index": 0
           }
         ]
       ]
@@ -745,7 +614,73 @@
       "ai_memory": [
         [
           {
-            "node": "AI Agent",
+            "node": "Main_Browser_Agent",
+            "type": "ai_memory",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "playwright1": {
+      "ai_tool": [
+        [
+          {
+            "node": "Browser_Recovery_Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLM1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Browser_Recovery_Agent",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "LLm cheep1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "Browser_Recovery_Agent",
+            "type": "ai_languageModel",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Browser_Recovery_Agent": {
+      "ai_tool": [
+        [
+          {
+            "node": "Main_Browser_Agent",
+            "type": "ai_tool",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Main_Browser_Agent": {
+      "main": [
+        [
+          {
+            "node": "Reply to Client",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Simple Memory1": {
+      "ai_memory": [
+        [
+          {
+            "node": "Browser_Recovery_Agent",
             "type": "ai_memory",
             "index": 0
           }
