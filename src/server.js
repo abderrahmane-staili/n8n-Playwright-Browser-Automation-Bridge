@@ -1,226 +1,487 @@
 
 const express = require("express");
 const { chromium } = require("playwright");
-const crypto = require("crypto");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 
-app.use(express.json({ limit: "1mb" }));
+app.use(express.json({ limit: "10mb" }));
 
-const PORT = process.env.PORT || 3000;
-const API_KEY = process.env.API_KEY;
+// ===============================
+// CONFIGURATION
+// ===============================
 
-if (!API_KEY) {
-  throw new Error("API_KEY is required");
+const PORT = 3000;
+const API_KEY = process.env.API_KEY || "change-this-secret";
+
+const BRAVE_PATH =
+  "C:\\Program Files\\BraveSoftware\\Brave-Browser\\Application\\brave.exe";
+
+const PROFILE_PATH = "C:\\BraveProfiles\\youssef\\profile1";
+
+const SCREENSHOT_DIR = path.join(__dirname, "screenshots");
+
+// ===============================
+// BROWSER STATE
+// ===============================
+
+let context = null;
+let page = null;
+let launchPromise = null;
+let requestQueue = Promise.resolve();
+
+if (!fs.existsSync(SCREENSHOT_DIR)) {
+  fs.mkdirSync(SCREENSHOT_DIR, { recursive: true });
 }
 
-// Authentication
-app.use((req, res, next) => {
-  const key = req.headers["x-api-key"];
+// ===============================
+// API KEY AUTHENTICATION
+// ===============================
 
-  if (
-    typeof key !== "string" ||
-    key.length !== API_KEY.length ||
-    !crypto.timingSafeEqual(
-      Buffer.from(key),
-      Buffer.from(API_KEY)
-    )
-  ) {
+function checkApiKey(req, res, next) {
+  const providedKey =
+    req.headers["x-api-key"] ||
+    (req.headers.authorization || "").replace(/^Bearer\s+/i, "");
+
+  if (providedKey !== API_KEY) {
     return res.status(401).json({
       success: false,
-      error: "Unauthorized"
+      error: "Unauthorized: Invalid API key"
     });
   }
 
   next();
-});
-
-let browser;
-
-async function getBrowser() {
-  if (!browser || !browser.isConnected()) {
-    browser = await chromium.launch({
-      headless: true,
-      args: ["--no-sandbox"]
-    });
-  }
-
-  return browser;
 }
 
-// Health check
-app.get("/health", async (req, res) => {
-  try {
-    const b = await getBrowser();
+// ===============================
+// NORMALIZE AI AGENT ACTIONS
+// ===============================
 
-    res.json({
-      success: true,
-      status: "running",
-      browser: b.isConnected() ? "connected" : "disconnected"
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-// Execute browser actions
-app.post("/execute", async (req, res) => {
-  const { actions } = req.body;
-
-  if (!Array.isArray(actions) || actions.length === 0 || actions.length > 15) {
-    return res.status(400).json({
-      success: false,
-      error: "Provide between 1 and 15 actions"
-    });
+function normalizeAction(action) {
+  if (!action || typeof action !== "object" || Array.isArray(action)) {
+    throw new Error("Invalid browser action");
   }
 
-  let context;
+  // Standard format:
+  // { type: "navigate", url: "https://youtube.com" }
 
-  try {
-    const b = await getBrowser();
+  if (typeof action.type === "string") {
+    const normalized = { ...action };
 
-    context = await b.newContext({
+    if (normalized.type === "goto") {
+      normalized.type = "navigate";
+    }
+
+    if (
+      normalized.type === "wait" &&
+      normalized.ms === undefined &&
+      normalized.milliseconds !== undefined
+    ) {
+      normalized.ms = normalized.milliseconds;
+    }
+
+    return normalized;
+  }
+
+  // AI Agent format:
+  // { goto: { url: "https://youtube.com" } }
+
+  const actionNames = Object.keys(action);
+
+  if (actionNames.length !== 1) {
+    throw new Error("Invalid browser action format");
+  }
+
+  let actionName = actionNames[0];
+  const actionParams = action[actionName];
+
+  if (actionName === "goto") {
+    actionName = "navigate";
+  }
+
+  const normalized = {
+    type: actionName,
+    ...(actionParams && typeof actionParams === "object"
+      ? actionParams
+      : {})
+  };
+
+  if (
+    normalized.type === "wait" &&
+    normalized.ms === undefined &&
+    normalized.milliseconds !== undefined
+  ) {
+    normalized.ms = normalized.milliseconds;
+  }
+
+  return normalized;
+}
+
+// ===============================
+// GET OR LAUNCH BROWSER
+// ===============================
+
+async function getBrowserPage() {
+  if (context && page && !page.isClosed()) {
+    return page;
+  }
+
+  if (launchPromise) {
+    return await launchPromise;
+  }
+
+  launchPromise = (async () => {
+    context = await chromium.launchPersistentContext(PROFILE_PATH, {
+      executablePath: BRAVE_PATH,
+      headless: false,
       viewport: {
         width: 1366,
         height: 768
-      }
+      },
+      args: [
+        "--no-first-run",
+        "--no-default-browser-check"
+      ]
     });
 
-    const page = await context.newPage();
+    // Close restored tabs so only one working tab remains.
+    const existingPages = context.pages();
+
+    for (const existingPage of existingPages) {
+      await existingPage.close().catch(() => {});
+    }
+
+    page = await context.newPage();
 
     page.setDefaultTimeout(15000);
+    page.setDefaultNavigationTimeout(30000);
 
-    const results = [];
+    console.log("Brave started with Profile 1.");
 
-    for (const action of actions) {
-      let result;
+    return page;
+  })();
 
-      switch (action.type) {
-        case "navigate": {
-          const url = new URL(action.url);
+  try {
+    return await launchPromise;
+  } finally {
+    launchPromise = null;
+  }
+}
 
-          if (!["http:", "https:"].includes(url.protocol)) {
-            throw new Error("Only HTTP and HTTPS URLs are allowed");
-          }
+// ===============================
+// CLOSE BROWSER
+// ===============================
 
-          await page.goto(url.href, {
-            waitUntil: "domcontentloaded",
-            timeout: 30000
-          });
+async function closeBrowser() {
+  if (context) {
+    await context.close().catch(() => {});
+  }
 
-          result = {
-            url: page.url(),
-            title: await page.title()
-          };
-          break;
-        }
+  context = null;
+  page = null;
 
-        case "click": {
-          if (!action.selector) {
-            throw new Error("Selector is required");
-          }
+  console.log("Brave browser closed.");
 
-          await page.locator(action.selector).first().click();
+  return {
+    success: true,
+    message: "Browser closed"
+  };
+}
 
-          result = {
-            clicked: action.selector
-          };
-          break;
-        }
+// ===============================
+// ACTION HANDLER
+// ===============================
 
-        case "fill": {
-          if (!action.selector) {
-            throw new Error("Selector is required");
-          }
+async function runAction(action) {
+  const currentPage = await getBrowserPage();
 
-          await page.locator(action.selector).first().fill(
-            String(action.value ?? "")
-          );
+  switch (action.type) {
 
-          result = {
-            filled: action.selector
-          };
-          break;
-        }
-
-        case "select": {
-          await page.locator(action.selector).first().selectOption(
-            String(action.value)
-          );
-
-          result = {
-            selected: action.value
-          };
-          break;
-        }
-
-        case "wait": {
-          const duration = Math.min(
-            Math.max(Number(action.ms) || 1000, 0),
-            10000
-          );
-
-          await page.waitForTimeout(duration);
-
-          result = {
-            waited: duration
-          };
-          break;
-        }
-
-        case "waitFor": {
-          await page.locator(action.selector).first().waitFor({
-            state: "visible"
-          });
-
-          result = {
-            visible: action.selector
-          };
-          break;
-        }
-
-        case "extract": {
-          const selector = action.selector || "body";
-
-          const text = await page.locator(selector).first().innerText();
-
-          result = {
-            text: text.slice(0, 12000)
-          };
-          break;
-        }
-
-        case "screenshot": {
-          const screenshot = await page.screenshot({
-            type: "png",
-            fullPage: false
-          });
-
-          result = {
-            screenshot: screenshot.toString("base64"),
-            format: "png"
-          };
-          break;
-        }
-
-        default:
-          throw new Error(`Unsupported action: ${action.type}`);
+    // NAVIGATE / GOTO
+    case "navigate": {
+      if (!action.url) {
+        throw new Error("Navigate requires a URL");
       }
 
-      results.push({
-        action: action.type,
+      const url = new URL(action.url);
+
+      if (!["http:", "https:"].includes(url.protocol)) {
+        throw new Error("Only HTTP and HTTPS URLs are allowed");
+      }
+
+      await currentPage.goto(url.toString(), {
+        waitUntil: "domcontentloaded",
+        timeout: 30000
+      });
+
+      return {
         success: true,
-        result
+        url: currentPage.url(),
+        title: await currentPage.title()
+      };
+    }
+
+    // CLICK
+    case "click": {
+      if (!action.selector) {
+        throw new Error("Click requires a selector");
+      }
+
+      await currentPage.locator(action.selector).first().click();
+
+      return {
+        success: true,
+        action: "click",
+        selector: action.selector
+      };
+    }
+
+    // FILL INPUT
+    case "fill": {
+      if (!action.selector) {
+        throw new Error("Fill requires a selector");
+      }
+
+      await currentPage.locator(action.selector).first().fill(
+        String(action.value ?? "")
+      );
+
+      return {
+        success: true,
+        action: "fill",
+        selector: action.selector
+      };
+    }
+
+    // SELECT OPTION
+    case "select": {
+      if (!action.selector) {
+        throw new Error("Select requires a selector");
+      }
+
+      await currentPage.locator(action.selector).first().selectOption(
+        String(action.value)
+      );
+
+      return {
+        success: true,
+        action: "select"
+      };
+    }
+
+    // WAIT
+    case "wait": {
+      const ms = Math.min(
+        Math.max(Number(action.ms) || 1000, 0),
+        30000
+      );
+
+      await currentPage.waitForTimeout(ms);
+
+      return {
+        success: true,
+        waited: ms
+      };
+    }
+
+    // WAIT FOR ELEMENT
+    case "waitFor": {
+      if (!action.selector) {
+        throw new Error("waitFor requires a selector");
+      }
+
+      await currentPage.locator(action.selector).first().waitFor({
+        state: action.state || "visible",
+        timeout: action.timeout || 15000
+      });
+
+      return {
+        success: true,
+        action: "waitFor",
+        selector: action.selector
+      };
+    }
+
+    // EXTRACT TEXT
+    case "extract": {
+      const selector = action.selector || "body";
+
+      const text = await currentPage
+        .locator(selector)
+        .first()
+        .innerText()
+        .catch(() => "");
+
+      const maxLength = Math.min(
+        Number(action.maxLength) || 5000,
+        10000
+      );
+
+      return {
+        success: true,
+        text: text.slice(0, maxLength)
+      };
+    }
+
+    // PAGE INFORMATION
+    case "pageInfo": {
+      const title = await currentPage.title();
+
+      const text = await currentPage
+        .locator("body")
+        .innerText()
+        .catch(() => "");
+
+      return {
+        success: true,
+        url: currentPage.url(),
+        title,
+        text: text.slice(0, 5000)
+      };
+    }
+
+    // SCREENSHOT
+    case "screenshot": {
+      const filename =
+        "screenshot-" + Date.now() + ".png";
+
+      const screenshotPath = path.join(
+        SCREENSHOT_DIR,
+        filename
+      );
+
+      await currentPage.screenshot({
+        path: screenshotPath,
+        fullPage: Boolean(action.fullPage)
+      });
+
+      return {
+        success: true,
+        screenshot: filename,
+        path: screenshotPath
+      };
+    }
+
+    // BACK
+    case "back": {
+      await currentPage.goBack({
+        waitUntil: "domcontentloaded",
+        timeout: 30000
+      }).catch(() => {});
+
+      return {
+        success: true,
+        url: currentPage.url()
+      };
+    }
+
+    // RELOAD
+    case "reload": {
+      await currentPage.reload({
+        waitUntil: "domcontentloaded",
+        timeout: 30000
+      });
+
+      return {
+        success: true,
+        url: currentPage.url()
+      };
+    }
+
+    // CLOSE BROWSER
+    case "closeBrowser": {
+      await closeBrowser();
+
+      return {
+        success: true,
+        message: "Browser closed"
+      };
+    }
+
+    default:
+      throw new Error(`Unsupported action: ${action.type}`);
+  }
+}
+
+// ===============================
+// SERIALIZE REQUESTS
+// ===============================
+
+function enqueue(task) {
+  const result = requestQueue.then(task);
+
+  requestQueue = result.catch(() => {});
+
+  return result;
+}
+
+// ===============================
+// HEALTH CHECK
+// ===============================
+
+app.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    service: "Brave Browser Automation",
+    browser: "Brave",
+    profile: "Profile 1",
+    port: PORT,
+    browserOpen: Boolean(context)
+  });
+});
+
+// ===============================
+// EXECUTE ACTIONS
+// ===============================
+
+app.post("/execute", checkApiKey, async (req, res) => {
+  try {
+    const actions = req.body.actions;
+
+    if (!Array.isArray(actions) || actions.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Request must contain a non-empty actions array"
       });
     }
 
-    res.json({
-      success: true,
-      currentUrl: page.url(),
-      title: await page.title(),
+    const results = await enqueue(async () => {
+      const actionResults = [];
+
+      for (let i = 0; i < actions.length; i++) {
+        const normalizedAction = normalizeAction(actions[i]);
+
+        try {
+          const result = await runAction(normalizedAction);
+
+          actionResults.push({
+            index: i,
+            action: normalizedAction.type,
+            ...result
+          });
+        } catch (error) {
+          actionResults.push({
+            index: i,
+            action: normalizedAction.type,
+            success: false,
+            error: error.message
+          });
+
+          // Stop after a failed action.
+          break;
+        }
+      }
+
+      return actionResults;
+    });
+
+    const success = results.every(item => item.success !== false);
+
+    res.status(success ? 200 : 500).json({
+      success,
+      totalActions: actions.length,
+      completedActions: results.length,
       results
     });
 
@@ -229,27 +490,39 @@ app.post("/execute", async (req, res) => {
       success: false,
       error: error.message
     });
-
-  } finally {
-    if (context) {
-      await context.close();
-    }
   }
 });
 
-// Start server
+// ===============================
+// CLOSE ENDPOINT
+// ===============================
+
+app.post("/close", checkApiKey, async (req, res) => {
+  try {
+    const result = await enqueue(async () => {
+      return await closeBrowser();
+    });
+
+    res.json(result);
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// ===============================
+// SERVER
+// ===============================
+
 app.listen(PORT, "0.0.0.0", () => {
-  console.log(`Playwright Bridge running on port ${PORT}`);
+  console.log("--------------------------------");
+  console.log("Brave Browser Automation Server");
+  console.log("--------------------------------");
+  console.log(`Port: ${PORT}`);
+  console.log("Profile: Profile 1");
+  console.log("Browser: Brave");
+  console.log("Server ready.");
 });
-
-// Graceful shutdown
-async function shutdown() {
-  if (browser) {
-    await browser.close();
-  }
-
-  process.exit(0);
-}
-
-process.on("SIGTERM", shutdown);
-process.on("SIGINT", shutdown);
