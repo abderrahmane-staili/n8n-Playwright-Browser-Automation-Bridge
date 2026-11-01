@@ -417,17 +417,6 @@ When reporting an issue, include:
 - Relevant page state.
 - Expected behavior.
 
-Remove credentials and private information before sharing logs or screenshots.
-
----
-
-## 📄 License
-
-No license has been specified yet.
-
-Add a `LICENSE` file to define the permissions for using, modifying, and distributing this project.
-
----
 
 <div align="center">
 
