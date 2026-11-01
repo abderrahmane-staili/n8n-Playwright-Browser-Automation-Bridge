@@ -24,7 +24,7 @@ The following screenshot shows the complete n8n automation architecture.
 
 <div align="center">
 
-![Workflow Overview](docs/images/workflow-overview.png)
+![image alt](https://github.com/abderrahmane-staili/n8n-Playwright-Browser-Automation-Bridge/blob/main/docs/images/workflow.jpeg?raw=true)
 
 </div>
 
