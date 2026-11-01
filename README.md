@@ -1,148 +1,438 @@
-# n8n Playwright Browser Automation Bridge
+<div align="center">
 
-REST API built with Node.js, Express.js, and Playwright to connect **n8n** workflows with **browser automation**:
-navigation, form filling, clicks, screenshots, and file uploads, all driven by plain HTTP Request nodes.
+# 🚀 n8n Playwright Browser Automation Bridge
 
+### AI-Powered Browser Automation with n8n, Playwright & LLM Agents
+
+An intelligent browser automation system that connects AI agents to a real Brave browser through a Playwright HTTP API, enabling automated browsing, page interaction, information extraction, and intelligent error recovery.
+
+<br>
+
+![n8n](https://img.shields.io/badge/n8n-Workflow-FF6D5A?style=for-the-badge&logo=n8n&logoColor=white)
+![Playwright](https://img.shields.io/badge/Playwright-Automation-2EAD33?style=for-the-badge&logo=playwright&logoColor=white)
+![Brave](https://img.shields.io/badge/Brave-Browser-FB542B?style=for-the-badge&logo=brave&logoColor=white)
+![AI Agents](https://img.shields.io/badge/AI-Agents-412991?style=for-the-badge&logo=openai&logoColor=white)
+![JavaScript](https://img.shields.io/badge/JavaScript-ES6+-F7DF1E?style=for-the-badge&logo=javascript&logoColor=black)
+
+</div>
+
+---
+
+## 📸 Workflow Overview
+
+The following screenshot shows the complete n8n automation architecture.
+
+<div align="center">
+
+![Workflow Overview](docs/images/workflow-overview.png)
+
+</div>
+
+---
+
+## 📌 Project Overview
+
+**n8n Playwright Browser Automation Bridge** is an AI-powered automation system designed to control a real Brave browser using natural language instructions.
+
+The system combines n8n workflows, LLM-powered agents, and Playwright browser automation to execute browser tasks, inspect web pages, interact with elements, extract information, and recover from execution errors.
+
+Users can interact with the system through Telegram using text, images, or voice messages.
+
+### 🎯 Main Objectives
+
+- Automate real browser interactions using AI agents.
+- Execute browser actions through a Playwright HTTP API.
+- Understand text, image, and voice instructions.
+- Inspect web pages before performing actions.
+- Extract relevant information from websites.
+- Recover from browser execution failures.
+- Verify important actions before reporting success.
+
+---
+
+## ✨ Key Features
+
+| Feature | Description |
+|---|---|
+| 🤖 AI Browser Agent | Understands natural language instructions and plans browser actions. |
+| 🌐 Real Browser Control | Controls a real Brave browser through Playwright. |
+| 💬 Telegram Integration | Receives user instructions and returns results. |
+| 🖼️ Image Understanding | Processes images using an AI vision model. |
+| 🎙️ Voice Transcription | Converts voice messages into text. |
+| 🔄 Error Recovery | Uses a dedicated Browser Recovery Agent. |
+| 🧠 Conversational Memory | Maintains relevant conversation context. |
+| 🔍 Page Inspection | Inspects the current browser page before acting. |
+| 📄 Information Extraction | Extracts specific information from websites. |
+| ✅ Action Verification | Verifies important browser actions before reporting success. |
+
+---
+
+## 🏗️ System Architecture
+
+The system is organized around a Main Browser Agent connected to browser automation tools, language models, memory, and a recovery agent.
+
+### Architecture Diagram
+
+```mermaid
+flowchart TD
+    A["Telegram Message"] --> B["Route by Message Type"]
+
+    B -->|Text| C["Prepare Text Message"]
+    B -->|Image| D["Get Image File"]
+    D --> E["Describe Image"]
+    B -->|Voice| F["Get Voice File"]
+    F --> G["Transcribe Voice"]
+
+    C --> H["Main Browser Agent"]
+    E --> H
+    G --> H
+
+    H <--> I["Playwright HTTP Tool"]
+    H <--> J["LLM"]
+    H <--> K["LLM Cheap"]
+    H <--> L["Simple Memory"]
+
+    H --> M["Browser Recovery Agent"]
+    M <--> I
+
+    H --> N["Reply to Client"]
 ```
-n8n (HTTP Request node)  ->  Express API  ->  Playwright / Chromium  ->  any public website
+
+### Core Components
+
+| Component | Responsibility |
+|---|---|
+| Receive Client Message | Receives incoming Telegram messages. |
+| Route by Message Type | Routes messages according to their type. |
+| Prepare Text Message | Prepares text instructions for the main agent. |
+| Get Image File | Downloads incoming image attachments. |
+| Describe Image | Analyzes images using an AI model. |
+| Get Voice File | Downloads incoming voice messages. |
+| Transcribe Voice | Converts voice messages into text. |
+| Main Browser Agent | Understands requests and coordinates browser execution. |
+| Playwright | Provides browser automation capabilities. |
+| LLM | Processes instructions and supports agent reasoning. |
+| LLM Cheap | Provides an alternative language model. |
+| Simple Memory | Maintains conversational context. |
+| Browser Recovery Agent | Handles failed or blocked browser operations. |
+| Reply to Client | Returns the final response to the user. |
+
+---
+
+## 🔄 Browser Automation Lifecycle
+
+The browser agent follows a structured execution process.
+
+```mermaid
+flowchart TD
+    A["Receive User Request"] --> B["Inspect Current Page"]
+    B --> C["Understand Page State"]
+    C --> D["Select Browser Action"]
+    D --> E["Execute Through Playwright"]
+    E --> F{"Action Successful?"}
+
+    F -->|Yes| G["Verify Result"]
+    F -->|No| H["Analyze Error"]
+
+    H --> I["Try Different Approach"]
+    I --> J{"Still Blocked?"}
+
+    J -->|No| G
+    J -->|Yes| K["Browser Recovery Agent"]
+
+    K --> L["Recovery Result"]
+    L --> G
+
+    G --> M["Return Final Response"]
 ```
 
-## Features
+### Execution Principles
 
-- `POST /browser/navigate`, `/click`, `/fill`, `/screenshot`, `/upload`
-- Stateful **sessions**, so one workflow can chain several steps on the same page
-- Screenshots returned as base64 (easy for n8n) or saved to disk and downloaded later
-- API-key authentication, strict input validation
-- **SSRF protection**: blocks localhost, private networks and cloud-metadata addresses, including via redirects
-- Docker image, health check, graceful shutdown, automated tests
+1. Inspect the current page before acting.
+2. Identify relevant elements before interacting with them.
+3. Prefer currently visible content when the user asks to open something already displayed.
+4. Use search only when explicitly requested or when no matching visible content exists.
+5. Never repeat an identical failed action without changing the approach.
+6. Verify important actions before reporting success.
+7. Delegate unresolved failures to Browser Recovery Agent.
+8. Always return a final response, even if execution fails.
 
-## Quick start
+---
 
-Requirements: Node.js 18+.
+## 🌐 Playwright HTTP API
+
+The browser agent communicates with the Playwright service through an HTTP Request tool.
+
+### API Configuration
+
+| Parameter | Configuration |
+|---|---|
+| HTTP Method | `POST` |
+| Endpoint | `/execute` |
+| Content Type | `application/json` |
+| Authentication | API Key |
+| API Key Header | `x-api-key` |
+| Browser | Brave |
+| Automation Engine | Playwright |
+
+### Endpoint
+
+```text
+http://host.docker.internal:3000/execute
+```
+
+### Example Request
+
+The API accepts an array of browser actions.
+
+```json
+{
+  "actions": [
+    {
+      "type": "navigate",
+      "url": "https://www.youtube.com"
+    }
+  ]
+}
+```
+
+### Example: Navigate and Inspect
+
+```json
+{
+  "actions": [
+    {
+      "type": "navigate",
+      "url": "https://www.youtube.com"
+    },
+    {
+      "type": "inspectPage"
+    }
+  ]
+}
+```
+
+> The exact action parameters depend on the installed Playwright bridge implementation.
+
+### cURL Example
 
 ```bash
-git clone https://github.com/<your-username>/n8n-playwright-browser-automation-bridge.git
-cd n8n-playwright-browser-automation-bridge
-
-npm install
-npx playwright install chromium
-
-cp .env.example .env        # then edit API_KEY (Windows PowerShell: copy .env.example .env)
-npm run dev
+curl -X POST "http://localhost:3000/execute" \
+  -H "Content-Type: application/json" \
+  -H "x-api-key: YOUR_API_KEY" \
+  -d '{
+    "actions": [
+      {
+        "type": "navigate",
+        "url": "https://www.youtube.com"
+      }
+    ]
+  }'
 ```
 
-Generate a strong key:
+Replace `YOUR_API_KEY` with your configured API key.
 
-```bash
-node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+**Security:** Never expose API keys or authentication credentials in public repositories.
+
+---
+
+## 🧰 Supported Browser Actions
+
+The current browser tool description includes the following actions:
+
+| Action | Function |
+|---|---|
+| `navigate` | Navigate to a specified URL. |
+| `click` | Click an element. |
+| `fill` | Enter text into an input field. |
+| `press` | Press a keyboard key. |
+| `scroll` | Scroll the current page. |
+| `hover` | Hover over an element. |
+| `select` | Select an option. |
+| `wait` | Wait for a specified duration. |
+| `waitFor` | Wait for an element or condition. |
+| `extract` | Extract requested page information. |
+| `evaluate` | Evaluate a supported browser expression. |
+| `inspectPage` | Inspect the current page. |
+| `getPageState` | Retrieve the current page state. |
+| `screenshot` | Capture a browser screenshot. |
+| `newTab` | Open a new browser tab. |
+| `switchTab` | Switch between browser tabs. |
+| `closeTab` | Close a browser tab. |
+| `back` | Navigate to the previous page. |
+| `forward` | Navigate to the next page. |
+| `reload` | Reload the current page. |
+
+---
+
+## 🛡️ Intelligent Error Recovery
+
+The project includes a dedicated **Browser Recovery Agent** connected to the main browser agent.
+
+Its purpose is to handle situations where the main agent cannot complete a browser task.
+
+### Recovery Process
+
+- Receive the original task.
+- Analyze the current page state.
+- Read the browser execution error.
+- Identify an alternative approach.
+- Continue browser execution.
+- Return the recovery result to the main agent.
+
+### Important Rules
+
+- Never repeat the same failed action blindly.
+- Use the error details to determine the next action.
+- Do not claim success without verification.
+- Ask the user to complete sensitive steps manually.
+
+---
+
+## 🧠 AI Agent Strategy
+
+The Main Browser Agent coordinates the browser tools and language models.
+
+| Agent / Component | Role |
+|---|---|
+| Main Browser Agent | Main reasoning and task execution. |
+| Browser Recovery Agent | Alternative execution and error recovery. |
+| LLM | Main language model. |
+| LLM Cheap | Alternative language model. |
+| Simple Memory | Conversational context. |
+| Playwright | Browser interaction tool. |
+
+### Example User Instructions
+
+| User Request | Expected Behavior |
+|---|---|
+| Open YouTube. | Navigate to YouTube. |
+| Open a PSG video from the homepage. | Inspect visible videos and open a matching one. |
+| Search for Python tutorials. | Use the website search functionality. |
+| Extract the page title. | Extract the requested title. |
+| Click the login button. | Inspect the page and interact with the matching button. |
+
+---
+
+## ⚙️ Installation & Configuration
+
+### Requirements
+
+- n8n instance.
+- Telegram Bot credentials.
+- Configured LLM provider.
+- Playwright HTTP automation service.
+- Brave browser accessible to the Playwright service.
+- Network connectivity between n8n and the browser service.
+
+### Configuration Checklist
+
+| Configuration | Required |
+|---|---|
+| Telegram Credentials | Yes |
+| LLM Credentials | Yes |
+| Playwright HTTP Endpoint | Yes |
+| Playwright API Key | Yes |
+| Brave Browser | Yes |
+| Simple Memory | Optional, depending on configuration |
+| Browser Recovery Agent | Recommended |
+
+### Docker Networking
+
+When n8n runs inside Docker and the Playwright service runs on the host, the endpoint may use:
+
+```text
+http://host.docker.internal:3000/execute
 ```
 
-Try it:
+The hostname depends on the deployment environment and Docker networking configuration.
 
-```bash
-curl http://localhost:3000/health
+---
 
-curl -X POST http://localhost:3000/browser/navigate \
-  -H "x-api-key: YOUR_KEY" -H "Content-Type: application/json" \
-  -d '{"url":"https://example.com"}'
-# -> {"sessionId":"...","url":"https://example.com/","title":"Example Domain","status":200}
+## 📁 Project Structure
+
+```text
+n8n-playwright-browser-automation-bridge/
+│
+├── README.md
+│
+├── docs/
+│   └── images/
+│       └── workflow-overview.png
+│
+└── ...
 ```
 
-## Configuration
+---
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `API_KEY` | required | Secret for the `x-api-key` header (min. 16 chars) |
-| `PORT` / `HOST` | `3000` / `127.0.0.1` | Listen address (Docker sets `HOST=0.0.0.0`) |
-| `HEADLESS` | `true` | Set `false` to watch the browser while developing |
-| `NO_SANDBOX` | `false` | Needed for Chromium inside Docker |
-| `MAX_SESSIONS` | `5` | Concurrent sessions |
-| `SESSION_TTL_MS` | `300000` | Idle time before a session is closed |
-| `DEFAULT_TIMEOUT_MS` | `15000` | Default action timeout |
-| `SCREENSHOTS_DIR` | `screenshots` | Where `response: "file"` screenshots go |
-| `ALLOWED_DOMAINS` | empty | Comma-separated allow-list for navigation |
-| `ALLOW_PRIVATE_HOSTS` | `false` | Disables the SSRF guard. **Development only** |
+## 🔐 Security Considerations
 
-## API reference
+- Store API keys securely.
+- Never commit Telegram bot tokens.
+- Do not publish browser cookies or session data.
+- Protect sensitive information in execution logs.
+- Ask for manual user intervention during login, CAPTCHA, and OTP verification.
+- Use secure credentials management in n8n.
 
-All `/browser/*` endpoints need the `x-api-key` header (or `Authorization: Bearer <key>`). Bodies are JSON.
+---
 
-| Method & path | Body | Returns |
-| --- | --- | --- |
-| `GET /health` | none | `{status, uptime, sessions}` (public) |
-| `POST /browser/navigate` | `url`, optional `sessionId`, `waitUntil` (`load` \| `domcontentloaded` \| `networkidle` \| `commit`), `timeoutMs` | `{sessionId, url, title, status}` |
-| `POST /browser/click` | `sessionId`, `selector`, optional `timeoutMs` | `{sessionId, url, title}` |
-| `POST /browser/fill` | `sessionId`, `selector`, `value` | `{sessionId, filled}` |
-| `POST /browser/screenshot` | `sessionId`, optional `selector`, `fullPage`, `type` (`png` \| `jpeg`), `response` (`base64` \| `file`) | `{base64, mimeType, bytes}` or `{file, downloadPath}` |
-| `POST /browser/upload` | `sessionId`, `selector` (a file input), `filename`, `contentBase64`, optional `mimeType` | `{uploaded, bytes}` |
-| `GET /browser/screenshots/:name` | none | the image file |
-| `DELETE /browser/session/:id` | none | `{closed: true}` |
+## 🚀 Future Improvements
 
-Errors are always `{"error": "..."}` with the right status: `400` validation, `401` auth, `403` blocked target,
-`404` unknown session, `429` too many sessions, `502` navigation failed, `504` timeout.
+Potential improvements for future versions:
 
-Selectors are standard [Playwright selectors](https://playwright.dev/docs/locators), for example `#email`,
-`input[name=q]`, `text=Sign in`.
+- More efficient browser response filtering.
+- Better token usage optimization.
+- Improved browser state inspection.
+- Advanced retry and recovery strategies.
+- Support for additional browser automation tasks.
+- Better execution monitoring and logging.
+- More structured browser action responses.
 
-## Using it from n8n
+---
 
-1. Add an **HTTP Request** node: method `POST`, URL `http://localhost:3000/browser/navigate`
-   (if n8n runs in Docker, use `http://host.docker.internal:3000`).
-2. Add the `x-api-key` header. Best practice: create a **Header Auth** credential in n8n instead of typing the key.
-3. Send JSON, for example `{"url": "https://example.com"}`.
-4. Reuse the returned `sessionId` in the next nodes: `{{ $('Navigate').first().json.sessionId }}`.
-5. Finish with `DELETE /browser/session/:id`.
+## 📊 Project Information
 
-A complete workflow (navigate, fill, screenshot, convert to file, close) is in
-[`examples/n8n-http-request.json`](examples/n8n-http-request.json). Import it from *Workflows -> Import from file*.
-It reads the key from the `PLAYWRIGHT_BRIDGE_API_KEY` environment variable; if your n8n blocks env access,
-swap those headers for a Header Auth credential. No credentials are stored in the file.
+| Property | Value |
+|---|---|
+| Project | n8n Playwright Browser Automation Bridge |
+| Category | AI Automation |
+| Workflow Engine | n8n |
+| Browser Automation | Playwright |
+| Browser | Brave |
+| Communication | HTTP API |
+| User Interface | Telegram |
+| Intelligence | LLM-based AI Agents |
+| Recovery | Browser Recovery Agent |
 
-## Docker
+---
 
-```bash
-docker build -t playwright-bridge .
-docker run --rm -p 3000:3000 -e API_KEY=$(openssl rand -hex 32) playwright-bridge
-```
+## 🤝 Contributing
 
-The base image tag in the `Dockerfile` must match the `playwright` version in `package.json`
-(currently `1.49.1`). Bump both together. The container runs Chromium with `--no-sandbox` as a non-root user;
-if you need the sandbox, run with a [seccomp profile](https://playwright.dev/docs/docker) and set `NO_SANDBOX=false`.
+Contributions, suggestions, and bug reports are welcome.
 
-## Security notes
+When reporting an issue, include:
 
-Do not expose this API directly to the internet without TLS (use a reverse proxy) and a strong `API_KEY`.
-Anyone holding the key can make your server browse the public web. Read [`docs/architecture.md`](docs/architecture.md)
-for the full security model and known limitations. Never commit `.env`, n8n credentials, or logins for websites.
+- The browser action that failed.
+- The error returned by the API.
+- Relevant page state.
+- Expected behavior.
 
-## Tests
+Remove credentials and private information before sharing logs or screenshots.
 
-```bash
-npm test            # fast unit + API tests, no browser needed
-npm run test:e2e    # also runs a real Chromium flow against a local test page
-```
+---
 
-## Project structure
+## 📄 License
 
-```
-src/
-  server.js                    Express app, config, error handling
-  routes/browser.routes.js     HTTP endpoints
-  services/browser.service.js  Playwright sessions and actions
-  middleware/auth.js           API key authentication
-  utils/validation.js          Input validation and SSRF guard
-tests/browser.test.js          node:test suite
-examples/n8n-http-request.json Importable n8n workflow
-docs/architecture.md           Diagrams and security model
-```
+No license has been specified yet.
 
-## Roadmap
+Add a `LICENSE` file to define the permissions for using, modifying, and distributing this project.
 
-- [ ] `select`, `press`, `waitForSelector`, and `evaluate`-free text extraction endpoints
-- [ ] Multi-step `/browser/run` endpoint to execute a whole script in one request
-- [ ] Rate limiting and per-key quotas
-- [ ] GitHub Actions CI
+---
 
-## License
+<div align="center">
 
-MIT
+### Built with n8n, Playwright & AI Agents
+
+**Automating the browser. One intelligent action at a time.**
+
+</div>
