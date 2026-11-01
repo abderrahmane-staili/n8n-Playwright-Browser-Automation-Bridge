@@ -1,0 +1,42 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: local-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: xxxxxxxxxxxxxx
+      POSTGRES_DB: testn8n
+    ports:
+      - "127.0.0.1:5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  testn8n:
+    image: docker.n8n.io/n8nio/n8n:2.32.7
+    container_name: local-n8n
+    restart: unless-stopped
+    depends_on:
+      - postgres
+    ports:
+      - "127.0.0.1:5679:5678"
+    environment:
+      DB_TYPE: postgresdb
+      DB_POSTGRESDB_HOST: postgres
+      DB_POSTGRESDB_PORT: 5432
+      DB_POSTGRESDB_DATABASE: testn8n
+      DB_POSTGRESDB_USER: ${POSTGRES_USER}
+      DB_POSTGRESDB_PASSWORD: xxxxxxxxxxxxxx
+      N8N_ENCRYPTION_KEY: xxxxxxxxxxxxxx
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      GENERIC_TIMEZONE: Africa/Casablanca
+      TZ: Africa/Casablanca
+    volumes:
+      - n8n_data:/home/node/.n8n
+      - "C:/Users/dell/Desktop/image-downloader:/files"
+
+volumes:
+  postgres_data:
+  n8n_data:
